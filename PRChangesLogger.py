@@ -2,7 +2,7 @@
     @f1r3f0x - 08/03/2019
     License: MIT
 
-    PRChangesLogger:
+    Azure DevOps PRChangesLogger:
     Creates a file with all the changes in pull request for specific branches.
 """
 
