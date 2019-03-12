@@ -1,4 +1,5 @@
-# Azure DevOps PRChangesLogger.py (Name subject to change)
+# Azure DevOps PRChangesLogger.py
+(Name subject to change)
 ## Creates a list of changed files between branches.
 
 ### Dependencies:
