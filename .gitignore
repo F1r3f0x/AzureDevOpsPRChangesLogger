@@ -6,3 +6,4 @@ dist
 pyenv
 PRChangesLogger.spec
 ignore
+config-test.json
