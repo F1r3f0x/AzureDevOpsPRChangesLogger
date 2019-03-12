@@ -20,7 +20,7 @@ from datetime import datetime
 from concurrent.futures.thread import ThreadPoolExecutor
 from concurrent import futures
 
-MAX_WORKERS = 16  # This will determine of pull request being processed at a time
+MAX_WORKERS = 16  # This will determine the number of pull requests being processed at a time
 
 
 # Fill in with your personal access token and org URL
