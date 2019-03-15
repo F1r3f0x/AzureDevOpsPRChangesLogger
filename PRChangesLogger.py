@@ -44,7 +44,7 @@ def process_pull_requests(git_client, repo_id, pull, ignore_extensionless_files=
         pull (GitPullRequest): PR to get the changes from.
 
     Keyword Args:
-        ignore_extensionless_files (bool) (default=True): Ignores files with a dot extension.
+        ignore_extensionless_files (bool) (default=True): Ignores files without a dot extension.
 
     Returns:
         dict with pull request changes by file path of the given PR.
@@ -210,6 +210,9 @@ def get_config(file_path) -> Config:
             }, open('config.json', 'w'))
             print('done!')
             return config
+        else:
+            print('Closing...')
+            exit(0)
     except json.JSONDecodeError as err:
         print('JSON Decoding Error -', str(err))
     except KeyError as err:
