@@ -243,4 +243,4 @@ if __name__ == "__main__":
             print('No changes found')
 
     print('by @f1r3f0x - https://github.com/F1r3f0x\n')
-    input('press any key to close ...\n\n')
+    input('press enter to close ...\n\n')
