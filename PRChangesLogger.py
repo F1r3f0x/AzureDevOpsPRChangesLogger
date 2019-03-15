@@ -5,57 +5,85 @@
     Azure DevOps PRChangesLogger:
     Creates a file with all the changes in pull request for specific branches.
 """
-
+# Azure
 from azure.devops.connection import Connection
 from azure.devops.released import git
 from azure.devops import exceptions as AZExceptions
 from msrest.authentication import BasicAuthentication
 from msrest import exceptions as MSExceptions
 from azure.devops.v5_0.git.models import GitPullRequestSearchCriteria
+
+# Other
 import openpyxl as xl
 from tqdm import tqdm
+import colorama as color
 
+# Standard library
 from pprint import pprint
 from datetime import datetime
 from concurrent.futures.thread import ThreadPoolExecutor
 from concurrent import futures
+from collections import namedtuple
+
 
 MAX_WORKERS = 16  # This will determine the number of pull requests being processed at a time
+DEFAULT_PULL_QUANTITY = 9999
 
 
-# Fill in with your personal access token and org URL
-access_token = 'yourtoken12345' # Be careful with this
-organization_url = 'https://yourorgurl.com'
-
-repository_name = 'hello_world'
-
-source_branch_name = 'dev'
-target_branch_name = 'master'
-
-pull_quantity = 99999
+config_fields = ['access_token', 'organization_url', 'repository_name', 'pull_quantity']
+Config = namedtuple('Config', config_fields, defaults=(None,) * len(config_fields))
 
 
-# Worker function
-def process_pull_requests(git_client, repo_id, pull):
+def process_pull_requests(git_client, repo_id, pull, ignore_extensionless_files=True) -> dict:
+    """
+    Worker function, gets all changes from a pull request.
+    
+    Args:
+        git_client (GitClient): Git client to query stuff from respositories.
+        repo_id (str): Id from the repository of the PR, is neccesary to make the request.
+        pull (GitPullRequest): PR to get the changes from.
+
+    Keyword Args:
+        ignore_extensionless_files (bool) (default=True): Ignores files with a dot extension.
+
+    Returns:
+        dict with pull request changes by file path of the given PR.
+    """
     processed_changes = {}
     commits = git_client.get_pull_request_commits(repo_id, pull.pull_request_id)
     
     for commit in commits:
         changes = git_client.get_changes(commit.commit_id, repo_id).changes
         for change in changes:
-            #print('\t ', change['item']['path'])
             file_name = change['item']['path']
 
-            if '.' in file_name:
-                counter = processed_changes.get(file_name)
-                if not counter:
-                    counter = 0
-                counter +=1
-                processed_changes[file_name] = counter
+            if  not '.' in file_name and ignore_extensionless_files:
+                continue
+
+            counter = processed_changes.get(file_name)
+            if not counter:
+                counter = 0
+            counter +=1
+            processed_changes[file_name] = counter
+
     return processed_changes
 
 
-def get_changes(access_token, organization_url, target_repo, source_branch_name, target_branch_name, pull_quantity):
+def get_changes(access_token, organization_url, target_repo, source_branch_name, target_branch_name, pull_quantity) -> dict:
+    """
+    Main function, connects to an Azure DevOps Org and gets all the PR changes from the given branches.
+    
+    Args:
+        access_token (str): Azure DevOps access token, must have the necesary permisions.
+        organization_url (str): URL of the org to conect to.
+        target_repo (str): Repo where the PR where made.
+        source_branch_name (str): Name of the source branch of the PRs.
+        target_branch_name (str): Name of the target branch of the PRs.
+        pull_quantity (int): Quantity of pulls being queried, is a quirk of the API, if you don't give it a number it will not retreive PRs.
+
+    Returns:
+        dict with pull request changes by file path.
+    """
     print('\nConnecting to API\n')
     try:
         # Create a connection to the org
@@ -78,12 +106,11 @@ def get_changes(access_token, organization_url, target_repo, source_branch_name,
 
     repo_travesia = None
     for repo in repositories:
-        #pprint.pprint(repo.__dict__)
         if repo.name == target_repo:
             repo_travesia = repo
     
     if not repo_travesia:
-        print(f'Repository {repository_name} not found.')
+        print(f'Repository {target_repo} not found.')
         return None
 
     # Find commits for the specific branch combination
@@ -109,37 +136,24 @@ def get_changes(access_token, organization_url, target_repo, source_branch_name,
                     all_changes[change] = data[change]
     print()
 
-    #print(all_changes)
-
-
-    """
-    print('Getting changes')
-    for pull in tqdm(pull_requests):
-        #pprint(pull.pull_request_id)
-        #pprint(pull.title)
-        #print(pull.creation_date)
-        #pprint(pull.url)
-        commits = git_client.get_pull_request_commits(repo_travesia.id, pull.pull_request_id)
-        
-        for commit in commits:
-            changes = git_client.get_changes(commit.commit_id, repo_travesia.id).changes
-            for change in changes:
-                #print('\t ', change['item']['path'])
-                file_name = change['item']['path']
-
-                if '.' in file_name:
-                    counter = all_changes.get(file_name)
-                    if not counter:
-                        counter = 0
-                    counter +=1
-                    all_changes[file_name] = counter
-    """
-
-    #pprint(all_changes)
     return all_changes
 
 
-def create_workbook(source_branch_name, target_branch_name, changes, workbook_title='output.xlsx'): 
+def create_workbook(source_branch_name, target_branch_name, changes, workbook_title='output.xlsx') -> xl.Workbook: 
+    """
+    Creates and saves an Excel Workbook with the list of changes.
+    
+    Args:
+        source_branch_name (str): Name of the source branch of the PRs.
+        target_branch_name (str): Name of the target branch of the PRs.
+        changes (dict): Changes by file path.
+
+    Keyword Args:
+        workbook_title (str): File path to final workbook.
+
+    Returns:
+        (xl.Workbook) In memory workbook.
+    """
     print('Creating Excel file...')
     
     wb = xl.load_workbook(filename='format.xlsx', data_only=True)
@@ -161,49 +175,67 @@ def create_workbook(source_branch_name, target_branch_name, changes, workbook_ti
     return wb
 
 
-if __name__ == "__main__":
-    import json
+def get_config(file_path) -> Config:
+    """
+    Gets the config file and returns a Config tuple.
 
-    print('\nF1r3f0x\'s Azure DevOps PR changes logger\n')
+    Args:
+        file_path (str): Path to config file (json)
 
-    valid_file = True
+    Returns:
+        (Config) Config namedtupple.
+    """
     try:
-        config = json.load(open('config.json'))
-        access_token = config['access_token']
-        organization_url = config['organization_url']
-        repository_name = config['repository_name']
-        pull_quantity = int(config['pull_quantity'])
+        config_file = json.load(open(file_path))
+        return Config(
+            access_token = config_file['access_token'],
+            organization_url = config_file['organization_url'],
+            repository_name = config_file['repository_name'],
+            pull_quantity = int(config_file['pull_quantity'])
+
+        )
     except FileNotFoundError as err:
         print('Config file not found')
         if input('Do you want to create a new one? (Y/N) ').strip().lower() == 'y':
-            access_token = input('Access Token: ')
-            organization_url = input('Organization URL: ')
-            repository_name = input('Repository Name: ')
+            config = Config(
+                access_token = input('Access Token: '),
+                organization_url = input('Organization URL: '),
+                repository_name = input('Repository Name: ')
+            )
             json.dump({
-                'access_token': access_token,
-                'organization_url': organization_url,
-                'repository_name': repository_name,
-                'pull_quantity': pull_quantity
+                'access_token': config.access_token,
+                'organization_url': config.organization_url,
+                'repository_name': config.repository_name,
+                'pull_quantity': DEFAULT_PULL_QUANTITY
             }, open('config.json', 'w'))
             print('done!')
-        else:
-            valid_file = False
+            return config
     except json.JSONDecodeError as err:
         print('JSON Decoding Error -', str(err))
-        valid_file = False
     except KeyError as err:
         print('Error in JSON Keys:', str(err))
-        valid_file = False
     except ValueError as err:
         print('Pull quantity must be an Int')
-        valid_file = False
+    return None
 
-    if valid_file:
+
+if __name__ == "__main__":
+    import json
+
+    color.init(autoreset=True)
+    
+    print()
+    print('F1r3f0x\'s ' + color.Fore.BLUE + color.Style.BRIGHT + color.Back.WHITE + 'Azure DevOps' + color.Style.RESET_ALL + ' PR changes logger')
+    print()
+
+    config = get_config('config-test.json')
+
+    if config:
         source_branch_name = input('Source Branch name: ')
         target_branch_name = input('Target Branch name: ')
 
-        changes = get_changes(access_token, organization_url, repository_name,
-            source_branch_name, target_branch_name, pull_quantity)
+        changes = get_changes(config.access_token, config.organization_url, config.repository_name,
+            source_branch_name, target_branch_name, config.pull_quantity)
 
         if changes:
             workbook = create_workbook(source_branch_name, target_branch_name, changes)
