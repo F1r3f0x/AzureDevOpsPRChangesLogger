@@ -40,7 +40,7 @@ def process_pull_requests(git_client, repo_id, pull, ignore_extensionless_files=
     
     Args:
         git_client (GitClient): Git client to query stuff from respositories.
-        repo_id (str): Id from the repository of the PR, is neccesary to make the request.
+        repo_id (str): Id from the repository of the PR, is necessary to make the request.
         pull (GitPullRequest): PR to get the changes from.
 
     Keyword Args:
@@ -75,8 +75,8 @@ def get_changes(access_token, organization_url, target_repo, source_branch_name,
     
     Args:
         access_token (str): Azure DevOps access token, must have the necesary permisions.
-        organization_url (str): URL of the org to conect to.
-        target_repo (str): Repo where the PR where made.
+        organization_url (str): URL of the org to connect to.
+        target_repo (str): Repo where the PR was made.
         source_branch_name (str): Name of the source branch of the PRs.
         target_branch_name (str): Name of the target branch of the PRs.
         pull_quantity (int): Quantity of pulls being queried, is a quirk of the API, if you don't give it a number it will not retreive PRs.
