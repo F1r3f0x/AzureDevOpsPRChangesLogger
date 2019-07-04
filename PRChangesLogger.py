@@ -34,7 +34,7 @@ config_fields = ['access_token', 'organization_url', 'repository_name', 'pull_qu
 Config = namedtuple('Config', config_fields, defaults=(None,) * len(config_fields))
 
 
-def process_pull_requests(git_client, repo_id, pull, ignore_extensionless_files=True) -> dict:
+def process_pull_requests(git_client, repo_id, pull, ignore_words, ignore_extensionless_files=True) -> dict:
     """
     Worker function, gets all changes from a pull request.
     
@@ -53,30 +53,38 @@ def process_pull_requests(git_client, repo_id, pull, ignore_extensionless_files=
     commits = git_client.get_pull_request_commits(repo_id, pull.pull_request_id)
     
     for commit in commits:
-        changes = git_client.get_changes(commit.commit_id, repo_id).changes
-        for change in changes:
-            file_name = change['item']['path']
+        # TODO: Rewrite in functional
+        ignore_commit = False
+        for word in ignore_words:
+            if commit.comment.lower().find(word) != -1:
+                ignore_commit = True
+            break
 
-            if  not '.' in file_name and ignore_extensionless_files:
-                continue
+        if not ignore_commit:
+            changes = git_client.get_changes(commit.commit_id, repo_id).changes
+            for change in changes:
+                file_name = change['item']['path']
 
-            counter = processed_changes.get(file_name)
-            if not counter:
-                counter = 0
-            counter +=1
-            processed_changes[file_name] = counter
+                if  not '.' in file_name and ignore_extensionless_files:
+                    continue
+
+                counter = processed_changes.get(file_name)
+                if not counter:
+                    counter = 0
+                counter +=1
+                processed_changes[file_name] = counter
 
     return processed_changes
 
 
-def get_changes(access_token, organization_url, target_repo, source_branches, target_branch_name, pull_quantity) -> dict:
+def get_changes(access_token, organization_url, target_repo_name, source_branches, target_branch_name, pull_quantity, ignore_words=[]) -> dict:
     """
     Main function, connects to an Azure DevOps Org and gets all the PR changes from the given branches.
     
     Args:
         access_token (str): Azure DevOps access token, must have the necesary permisions.
         organization_url (str): URL of the org to connect to.
-        target_repo (str): Repo where the PR was made.
+        target_repo_name (str): Repo where the PR was made.
         source_branches (list): Names of the source branches of the PRs.
         target_branch_name (str): Name of the target branch of the PRs.
         pull_quantity (int): Quantity of pulls being queried, is a quirk of the API, if you don't give it a number it will not retreive PRs.
@@ -104,13 +112,13 @@ def get_changes(access_token, organization_url, target_repo, source_branches, ta
     except MSExceptions.AuthenticationError as err:
         print('Authentication Error: ', str(err))
 
-    repo_travesia = None
+    target_repo = None
     for repo in repositories:
-        if repo.name == target_repo:
-            repo_travesia = repo
+        if repo.name == target_repo_name:
+            target_repo = repo
     
-    if not repo_travesia:
-        print(f'Repository {target_repo} not found.')
+    if not target_repo:
+        print(f'Repository {target_repo_name} not found.')
         return None
 
     all_changes = {}
@@ -124,13 +132,13 @@ def get_changes(access_token, organization_url, target_repo, source_branches, ta
             status = 'Completed'
         )
 
-        pull_requests = git_client.get_pull_requests(repo_travesia.id, search_criteria, top=9999)
+        pull_requests = git_client.get_pull_requests(target_repo.id, search_criteria, top=9999)
 
 
         print(f"Proccesing PR commits for {branch}...")
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            future_prs = { executor.submit(process_pull_requests, git_client, repo_travesia.id, pull): pull for pull in pull_requests}
-            for future in tqdm(futures.as_completed(future_prs), unit=' Commits'):
+            future_prs = { executor.submit(process_pull_requests, git_client, target_repo.id, pull, ignore_words): pull for pull in pull_requests}
+            for future in tqdm(futures.as_completed(future_prs), unit=' PRs'):
                 data = future.result()
                 for change in data.keys():
                     if all_changes.get(change):
@@ -260,8 +268,19 @@ if __name__ == "__main__":
 
         target_branch_name = input('Target Branch name: ')
 
-        changes = get_changes(config.access_token, config.organization_url, config.repository_name,
-            source_branches, target_branch_name, config.pull_quantity)
+        # TODO: Rewrite in functional
+        ignore_words = input('Ignore words (case insensitive, separated by comma): ')
+        if ignore_words != '':
+            pre_ignore_words = ignore_words.split(',')
+            ignore_words = []
+            for word in pre_ignore_words:
+                ignore_words.append(word.lower().strip())
+
+            changes = get_changes(config.access_token, config.organization_url, config.repository_name,
+                source_branches, target_branch_name, config.pull_quantity, ignore_words=ignore_words)
+        else:
+            changes = get_changes(config.access_token, config.organization_url, config.repository_name,
+                source_branches, target_branch_name, config.pull_quantity)
 
         if changes:
             workbook = create_workbook(source_branches, target_branch_name, changes)
