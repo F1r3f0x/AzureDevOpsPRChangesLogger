@@ -34,10 +34,10 @@ config_fields = ['access_token', 'organization_url', 'repository_name', 'pull_qu
 Config = namedtuple('Config', config_fields, defaults=(None,) * len(config_fields))
 
 
-def process_pull_requests(git_client, repo_id, pull, ignore_words, ignore_extensionless_files=True) -> dict:
+def process_pull_requests(git_client, repo_id, pull, ignore_words, ignore_extensionless_files=True) -> [dict, list, list]:
     """
     Worker function, gets all changes from a pull request.
-    
+
     Args:
         git_client (GitClient): Git client to query stuff from respositories.
         repo_id (str): Id from the repository of the PR, is necessary to make the request.
@@ -51,14 +51,17 @@ def process_pull_requests(git_client, repo_id, pull, ignore_words, ignore_extens
     """
     processed_changes = {}
     commits = git_client.get_pull_request_commits(repo_id, pull.pull_request_id)
-    
+
+    ignored_commits = []
+    processed_commits = []
+
     for commit in commits:
-        # TODO: Rewrite in functional
+        commit_text = f'{commit.comment}, author: {color.Fore.BLUE}{color.Style.BRIGHT}{commit.author.name}{color.Style.RESET_ALL}'
         ignore_commit = False
         for word in ignore_words:
             if commit.comment.lower().find(word) != -1:
                 ignore_commit = True
-            break
+                break
 
         if not ignore_commit:
             changes = git_client.get_changes(commit.commit_id, repo_id).changes
@@ -73,14 +76,17 @@ def process_pull_requests(git_client, repo_id, pull, ignore_words, ignore_extens
                     counter = 0
                 counter +=1
                 processed_changes[file_name] = counter
+            processed_commits.append(commit_text)
+        else:
+            ignored_commits.append(commit_text)
 
-    return processed_changes
+    return processed_changes, processed_commits, ignored_commits
 
 
 def get_changes(access_token, organization_url, target_repo_name, source_branches, target_branch_name, pull_quantity, ignore_words=[]) -> dict:
     """
     Main function, connects to an Azure DevOps Org and gets all the PR changes from the given branches.
-    
+
     Args:
         access_token (str): Azure DevOps access token, must have the necesary permisions.
         organization_url (str): URL of the org to connect to.
@@ -116,12 +122,15 @@ def get_changes(access_token, organization_url, target_repo_name, source_branche
     for repo in repositories:
         if repo.name == target_repo_name:
             target_repo = repo
-    
+
     if not target_repo:
         print(f'Repository {target_repo_name} not found.')
         return None
 
     all_changes = {}
+
+    ignored_commits = []
+    processed_commits = []
 
     for branch in source_branches:
 
@@ -139,21 +148,25 @@ def get_changes(access_token, organization_url, target_repo_name, source_branche
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             future_prs = { executor.submit(process_pull_requests, git_client, target_repo.id, pull, ignore_words): pull for pull in pull_requests}
             for future in tqdm(futures.as_completed(future_prs), unit=' PRs'):
-                data = future.result()
+                data, processed, ignored = future.result()
                 for change in data.keys():
                     if all_changes.get(change):
                         all_changes[change] = all_changes[change] + data[change]
                     else:
                         all_changes[change] = data[change]
+                for commit in processed:
+                    processed_commits.append(commit)
+                for commit in ignored:
+                    ignored_commits.append(commit)
         print()
 
-    return all_changes
+    return all_changes, processed_commits, ignored_commits
 
 
-def create_workbook(source_branches, target_branch_name, changes, workbook_title='output.xlsx') -> xl.Workbook: 
+def create_workbook(source_branches, target_branch_name, changes, workbook_title='output.xlsx') -> xl.Workbook:
     """
     Creates and saves an Excel Workbook with the list of changes.
-    
+
     Args:
         source_branches (list): Name of the source branch of the PRs.
         target_branch_name (str): Name of the target branch of the PRs.
@@ -166,7 +179,7 @@ def create_workbook(source_branches, target_branch_name, changes, workbook_title
         (xl.Workbook) In memory workbook.
     """
     print('Creating Excel file...')
-    
+
     wb = xl.load_workbook(filename='format.xlsx', data_only=True)
     sheet = wb.active
 
@@ -237,7 +250,7 @@ if __name__ == "__main__":
     import json
 
     color.init(autoreset=True)
-    
+
     print()
     print('F1r3f0x\'s ' + color.Fore.BLUE + color.Style.BRIGHT + color.Back.WHITE + 'Azure DevOps' + color.Style.RESET_ALL + ' PR changes logger')
     print()
@@ -255,7 +268,7 @@ if __name__ == "__main__":
             adding_branches = True
             while adding_branches:
                 source_branches.append(input('New Source Branch name: '))
-                
+
                 print('\nCurrent Branches: ')
                 pprint(source_branches)
                 print()
@@ -268,24 +281,31 @@ if __name__ == "__main__":
 
         target_branch_name = input('Target Branch name: ')
 
-        # TODO: Rewrite in functional
+        changes, processed, ignored = [], [] , []
         ignore_words = input('Ignore words (case insensitive, separated by comma): ')
         if ignore_words != '':
             pre_ignore_words = ignore_words.split(',')
-            ignore_words = []
-            for word in pre_ignore_words:
-                ignore_words.append(word.lower().strip())
+            ignore_words = [word.lower().strip() for word in pre_ignore_words]
 
-            changes = get_changes(config.access_token, config.organization_url, config.repository_name,
+            changes, processed, ignored = get_changes(config.access_token, config.organization_url, config.repository_name,
                 source_branches, target_branch_name, config.pull_quantity, ignore_words=ignore_words)
         else:
-            changes = get_changes(config.access_token, config.organization_url, config.repository_name,
+            changes, processed, ignored = get_changes(config.access_token, config.organization_url, config.repository_name,
                 source_branches, target_branch_name, config.pull_quantity)
 
         if changes:
             workbook = create_workbook(source_branches, target_branch_name, changes)
         else:
             print('No changes found')
+
+        print('Processed Commits: ')
+        for commit in processed:
+            print('\t', commit)
+        print('\nIgnored Commits: ')
+        for commit in ignored:
+            print('\t', commit)
+
+        print('\n\n')
 
     print('by @f1r3f0x - https://github.com/F1r3f0x\n')
     input('press enter to close ...\n\n')
