@@ -255,7 +255,7 @@ if __name__ == "__main__":
     print('F1r3f0x\'s ' + color.Fore.BLUE + color.Style.BRIGHT + color.Back.WHITE + 'Azure DevOps' + color.Style.RESET_ALL + ' PR changes logger')
     print()
 
-    config = get_config('config-test.json')
+    config = get_config('config.json')
 
     if config:
         source_branches = []
